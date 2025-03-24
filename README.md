@@ -1,4 +1,3 @@
-DuffyDiff
 DuffyDiff è uno strumento moderno e user-friendly per il confronto di testi, costruito con Python e Tkinter. Permette agli utenti di confrontare facilmente due file di testo, navigare tra le differenze e unire i contenuti tra i file.
 
 Funzionalità
