@@ -1,563 +1,465 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, font
+from tkinter import ttk, filedialog, messagebox
 import difflib
 import os
 from datetime import datetime
-import json
 
 class ModernDiffApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("DuffyDiff Pro 2.0 - Auto Compare")
-        self.root.geometry("1600x900")
+        self.root.title("DiffTool - File Compare")
+        self.root.geometry("1400x800")
         
-        # Auto-compare settings
+        # Settings
         self.auto_compare = True
-        self.compare_delay = 500  # milliseconds
+        self.compare_delay = 500
         self.compare_timer = None
-        
-        # Theme configuration
-        self.dark_mode = False
-        self.themes = {
-            "light": {
-                "bg": "#FFFFFF",
-                "fg": "#212529",
-                "panel_bg": "#F8F9FA",
-                "text_bg": "#FFFFFF",
-                "text_fg": "#212529",
-                "added": "#D4EDDA",
-                "removed": "#F8D7DA",
-                "modified": "#FFF3CD",
-                "line_bg": "#E9ECEF",
-                "button_bg": "#007BFF",
-                "button_hover": "#0056B3",
-                "header_bg": "#343A40",
-                "header_fg": "#FFFFFF",
-                "border": "#DEE2E6",
-                "highlight": "#FFC107"
-            },
-            "dark": {
-                "bg": "#1E1E1E",
-                "fg": "#E0E0E0",
-                "panel_bg": "#252525",
-                "text_bg": "#2D2D2D",
-                "text_fg": "#E0E0E0",
-                "added": "#1B5E20",
-                "removed": "#B71C1C",
-                "modified": "#F57C00",
-                "line_bg": "#3E3E3E",
-                "button_bg": "#2196F3",
-                "button_hover": "#1976D2",
-                "header_bg": "#161616",
-                "header_fg": "#FFFFFF",
-                "border": "#404040",
-                "highlight": "#FFD700"
-            }
-        }
-        
-        # File management
-        self.left_file = None
-        self.right_file = None
-        
-        # Diff tracking
-        self.differences = []
-        self.current_diff = -1
-        
-        # History for undo/redo
-        self.history = []
-        self.history_index = -1
-        self.max_history = 50
-        
-        # Sync scroll flag
         self.sync_scroll = True
         self.is_syncing = False
         
-        # Track if we're in the middle of an update
-        self.is_updating = False
+        # Files
+        self.left_file = None
+        self.right_file = None
         
-        # Initialize UI
-        self.setup_styles()
-        self.create_menu()
+        # Differences
+        self.differences = []
+        self.current_diff = -1
+        self.diff_widgets = []
+        
+        # History for undo
+        self.history = []
+        self.history_index = -1
+        
+        # Create UI
         self.create_toolbar()
         self.create_main_panels()
         self.create_statusbar()
         self.setup_bindings()
         
-        # Apply initial theme
-        self.apply_theme()
-        
-        # Start auto-compare if enabled
-        if self.auto_compare:
-            self.schedule_compare()
-    
-    def setup_styles(self):
-        """Configure ttk styles"""
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        
-    def apply_theme(self):
-        """Apply selected theme to all widgets"""
-        theme = self.themes["dark" if self.dark_mode else "light"]
-        
-        # Configure root
-        self.root.configure(bg=theme["bg"])
-        
-        # Configure styles
-        self.style.configure("TFrame", background=theme["bg"])
-        self.style.configure("Header.TFrame", background=theme["header_bg"])
-        self.style.configure("TLabel", background=theme["bg"], foreground=theme["fg"])
-        self.style.configure("Header.TLabel", background=theme["header_bg"], foreground=theme["header_fg"])
-        self.style.configure("TButton", background=theme["button_bg"], foreground="#FFFFFF")
-        
-        # Update text widgets if they exist
-        if hasattr(self, 'left_text'):
-            self.left_text.configure(
-                bg=theme["text_bg"],
-                fg=theme["text_fg"],
-                insertbackground=theme["fg"]
-            )
-            self.right_text.configure(
-                bg=theme["text_bg"],
-                fg=theme["text_fg"],
-                insertbackground=theme["fg"]
-            )
-            
-            # Update line numbers
-            self.left_lines.configure(
-                bg=theme["line_bg"],
-                fg=theme["fg"]
-            )
-            self.right_lines.configure(
-                bg=theme["line_bg"],
-                fg=theme["fg"]
-            )
-            
-            # Update diff colors
-            self.configure_tags()
-    
-    def create_menu(self):
-        """Create application menu"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open Left", command=lambda: self.load_file("left"), accelerator="Ctrl+O")
-        file_menu.add_command(label="Open Right", command=lambda: self.load_file("right"), accelerator="Ctrl+Shift+O")
-        file_menu.add_separator()
-        file_menu.add_command(label="Save Left", command=lambda: self.save_file("left"), accelerator="Ctrl+S")
-        file_menu.add_command(label="Save Right", command=lambda: self.save_file("right"), accelerator="Ctrl+Shift+S")
-        file_menu.add_separator()
-        file_menu.add_command(label="Export Diff", command=self.export_diff)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
-        
-        # Edit menu
-        edit_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Edit", menu=edit_menu)
-        edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl+Z")
-        edit_menu.add_command(label="Redo", command=self.redo, accelerator="Ctrl+Y")
-        edit_menu.add_separator()
-        edit_menu.add_command(label="Find", command=self.find_dialog, accelerator="Ctrl+F")
-        edit_menu.add_command(label="Replace", command=self.replace_dialog, accelerator="Ctrl+H")
-        
-        # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_checkbutton(label="Dark Mode", command=self.toggle_theme)
-        view_menu.add_checkbutton(label="Sync Scroll", command=self.toggle_sync_scroll, variable=tk.BooleanVar(value=True))
-        view_menu.add_checkbutton(label="Auto Compare", command=self.toggle_auto_compare, variable=tk.BooleanVar(value=True))
-        view_menu.add_separator()
-        view_menu.add_command(label="Next Difference", command=self.next_diff, accelerator="F3")
-        view_menu.add_command(label="Previous Difference", command=self.prev_diff, accelerator="Shift+F3")
-        
-        # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Manual Compare", command=self.compare, accelerator="F5")
-        tools_menu.add_command(label="Clear All", command=self.clear_all)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Merge Left → Right", command=lambda: self.merge_all("right"))
-        tools_menu.add_command(label="Merge Right → Left", command=lambda: self.merge_all("left"))
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Settings", command=self.open_settings)
-        
     def create_toolbar(self):
-        """Create toolbar with main actions"""
-        toolbar = ttk.Frame(self.root, style="Header.TFrame")
-        toolbar.pack(fill=tk.X, side=tk.TOP)
+        """Create modern toolbar"""
+        toolbar = tk.Frame(self.root, bg="#1e272e", height=45)
+        toolbar.pack(fill=tk.X)
+        toolbar.pack_propagate(False)
         
-        # Create modern buttons
-        self.create_toolbar_button(toolbar, "📁 Open Left", lambda: self.load_file("left"))
-        self.create_toolbar_button(toolbar, "📁 Open Right", lambda: self.load_file("right"))
-        ttk.Separator(toolbar, orient="vertical").pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        # Style for toolbar buttons
+        button_style = {
+            'font': ('Segoe UI', 10),
+            'bd': 0,
+            'padx': 20,
+            'pady': 10,
+            'cursor': 'hand2'
+        }
         
-        # Auto-compare toggle button
-        self.auto_compare_btn = self.create_toolbar_button(
-            toolbar, 
-            "🔄 Auto: ON" if self.auto_compare else "🔄 Auto: OFF", 
-            self.toggle_auto_compare, 
-            "#28A745" if self.auto_compare else "#6C757D"
-        )
+        # File buttons
+        btn = tk.Button(toolbar, text="📁 Open Left", command=lambda: self.load_file("left"),
+                       bg="#0984e3", fg="white", activebackground="#74b9ff", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#0984e3", "#74b9ff")
         
-        ttk.Separator(toolbar, orient="vertical").pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        btn = tk.Button(toolbar, text="📁 Open Right", command=lambda: self.load_file("right"),
+                       bg="#0984e3", fg="white", activebackground="#74b9ff", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#0984e3", "#74b9ff")
         
-        self.create_toolbar_button(toolbar, "⬅ Prev", self.prev_diff, "#FFC107")
-        self.create_toolbar_button(toolbar, "➡ Next", self.next_diff, "#FFC107")
-        ttk.Separator(toolbar, orient="vertical").pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        # Separator
+        tk.Frame(toolbar, width=2, bg="#2d3436").pack(side=tk.LEFT, fill=tk.Y, padx=10)
         
-        self.create_toolbar_button(toolbar, "↶ Undo", self.undo, "#DC3545")
-        self.create_toolbar_button(toolbar, "↷ Redo", self.redo, "#DC3545")
-        ttk.Separator(toolbar, orient="vertical").pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        # Compare buttons
+        btn = tk.Button(toolbar, text="🔍 Compare", command=self.compare,
+                       bg="#00b894", fg="white", activebackground="#55efc4", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#00b894", "#55efc4")
         
-        self.create_toolbar_button(toolbar, "💾 Save", lambda: self.save_file(self.get_active_panel()))
+        self.auto_btn = tk.Button(toolbar, text=f"⚡ Auto: {'ON' if self.auto_compare else 'OFF'}", 
+                                 command=self.toggle_auto_compare,
+                                 bg="#00b894" if self.auto_compare else "#636e72", 
+                                 fg="white", activebackground="#55efc4", **button_style)
+        self.auto_btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(self.auto_btn, "#00b894" if self.auto_compare else "#636e72", "#55efc4")
         
-        # Right side info
-        info_frame = ttk.Frame(toolbar, style="Header.TFrame")
-        info_frame.pack(side=tk.RIGHT, padx=10)
+        # Separator
+        tk.Frame(toolbar, width=2, bg="#2d3436").pack(side=tk.LEFT, fill=tk.Y, padx=10)
         
-        self.diff_info = ttk.Label(info_frame, text="No differences", style="Header.TLabel")
-        self.diff_info.pack()
+        # Navigation buttons
+        btn = tk.Button(toolbar, text="◀ Previous", command=self.prev_diff,
+                       bg="#fdcb6e", fg="#2d3436", activebackground="#ffeaa7", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#fdcb6e", "#ffeaa7")
         
-        self.auto_status = ttk.Label(
-            info_frame, 
-            text="🟢 Auto-compare: ON" if self.auto_compare else "🔴 Auto-compare: OFF", 
-            style="Header.TLabel",
-            font=("Segoe UI", 9)
-        )
-        self.auto_status.pack()
+        btn = tk.Button(toolbar, text="Next ▶", command=self.next_diff,
+                       bg="#fdcb6e", fg="#2d3436", activebackground="#ffeaa7", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#fdcb6e", "#ffeaa7")
         
-    def create_toolbar_button(self, parent, text, command, color="#007BFF"):
-        """Create a modern toolbar button"""
-        btn = tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=color,
-            fg="white",
-            relief=tk.FLAT,
-            padx=10,
-            pady=5,
-            font=("Segoe UI", 10),
-            cursor="hand2"
-        )
-        btn.pack(side=tk.LEFT, padx=2, pady=5)
+        # Separator
+        tk.Frame(toolbar, width=2, bg="#2d3436").pack(side=tk.LEFT, fill=tk.Y, padx=10)
         
-        # Hover effect
-        btn.bind("<Enter>", lambda e: btn.configure(relief=tk.RAISED))
-        btn.bind("<Leave>", lambda e: btn.configure(relief=tk.FLAT))
+        # Undo button
+        btn = tk.Button(toolbar, text="↩ Undo", command=self.undo,
+                       bg="#a29bfe", fg="white", activebackground="#d6a2ff", **button_style)
+        btn.pack(side=tk.LEFT, padx=3, pady=7)
+        self.add_hover_effect(btn, "#a29bfe", "#d6a2ff")
         
-        return btn
-    
+        # Info label
+        self.info_label = tk.Label(toolbar, text="Ready", bg="#1e272e", fg="white", 
+                                  font=("Segoe UI", 11, "bold"))
+        self.info_label.pack(side=tk.RIGHT, padx=20)
+        
+    def add_hover_effect(self, button, normal_color, hover_color):
+        """Add hover effect to button"""
+        button.bind("<Enter>", lambda e: button.config(bg=hover_color))
+        button.bind("<Leave>", lambda e: button.config(bg=normal_color))
+        
     def create_main_panels(self):
-        """Create the main text panels"""
-        main_container = ttk.Frame(self.root)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        """Create the main comparison panels"""
+        main_frame = tk.Frame(self.root, bg="#dfe6e9")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Left panel
-        left_frame = ttk.Frame(main_container)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=2)
+        # LEFT PANEL
+        left_frame = tk.Frame(main_frame, bg="#b2bec3")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         
-        # Left header
-        left_header = ttk.Frame(left_frame)
-        left_header.pack(fill=tk.X)
+        # Left title
+        title_frame = tk.Frame(left_frame, bg="#2d3436", height=35)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
         
-        self.left_title = ttk.Label(left_header, text="Left Panel - No File", font=("Segoe UI", 11, "bold"))
-        self.left_title.pack(side=tk.LEFT, padx=5, pady=2)
+        self.left_title = tk.Label(title_frame, text="Left: No file", bg="#2d3436", fg="white", 
+                                  font=("Segoe UI", 11), pady=5)
+        self.left_title.pack(expand=True)
         
-        # Left text container
-        left_text_frame = ttk.Frame(left_frame)
+        # Left text frame (contains line numbers + text)
+        left_text_frame = tk.Frame(left_frame)
         left_text_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Left line numbers
-        self.left_lines = tk.Text(
-            left_text_frame,
-            width=5,
-            padx=5,
-            pady=5,
-            state=tk.DISABLED,
-            font=("Consolas", 11),
-            relief=tk.FLAT
-        )
+        # Create Text widget for text
+        self.left_text = tk.Text(left_text_frame, wrap=tk.NONE, font=("Consolas", 12),
+                                bg="#ffffff", fg="#2d3436", bd=0, padx=10, pady=5, 
+                                undo=True, insertbackground="#2d3436")
+        
+        # Create scrollbars
+        self.left_vscroll = ttk.Scrollbar(left_text_frame, orient=tk.VERTICAL)
+        left_hscroll = ttk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
+        
+        # Pack in correct order
+        self.left_vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.left_text.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        left_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Line numbers canvas
+        self.left_lines = tk.Canvas(left_text_frame, width=60, bg="#ecf0f1", bd=0, highlightthickness=0)
         self.left_lines.pack(side=tk.LEFT, fill=tk.Y)
         
-        # Left text widget
-        self.left_text = tk.Text(
-            left_text_frame,
-            wrap=tk.NONE,
-            padx=5,
-            pady=5,
-            font=("Consolas", 11),
-            undo=True,
-            maxundo=20
-        )
-        self.left_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Configure scrolling
+        self.left_text.config(yscrollcommand=self.sync_left_scroll)
+        self.left_text.config(xscrollcommand=left_hscroll.set)
+        self.left_vscroll.config(command=self.sync_left_view)
+        left_hscroll.config(command=self.left_text.xview)
         
-        # Left scrollbars
-        left_vscroll = ttk.Scrollbar(left_text_frame, orient=tk.VERTICAL, command=self.left_text.yview)
-        left_vscroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.left_text.config(yscrollcommand=lambda *args: self.sync_vertical_scroll(left_vscroll, *args))
+        # MIDDLE PANEL
+        middle_frame = tk.Frame(main_frame, width=160, bg="#b2bec3")
+        middle_frame.grid(row=0, column=1, sticky="ns", padx=2, pady=2)
+        middle_frame.grid_propagate(False)
         
-        left_hscroll = ttk.Scrollbar(left_frame, orient=tk.HORIZONTAL, command=self.left_text.xview)
-        left_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
-        self.left_text.config(xscrollcommand=lambda *args: self.sync_horizontal_scroll(left_hscroll, *args))
+        # Middle title
+        title_frame = tk.Frame(middle_frame, bg="#2d3436", height=35)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
         
-        # Middle control panel
-        middle_frame = ttk.Frame(main_container)
-        middle_frame.grid(row=0, column=1, sticky="ns", padx=5)
+        tk.Label(title_frame, text="Actions", bg="#2d3436", fg="white", 
+                font=("Segoe UI", 11), pady=5).pack(expand=True)
         
-        # Middle header
-        ttk.Label(middle_frame, text="Actions", font=("Segoe UI", 11, "bold")).pack(pady=5)
+        # Middle canvas (no scrollbar - it follows text panels)
+        self.middle_canvas = tk.Canvas(middle_frame, bg="#dfe6e9", bd=0, highlightthickness=0)
+        self.middle_canvas.pack(fill=tk.BOTH, expand=True)
         
-        # Quick stats
-        self.stats_frame = ttk.Frame(middle_frame)
-        self.stats_frame.pack(pady=10)
+        # RIGHT PANEL
+        right_frame = tk.Frame(main_frame, bg="#b2bec3")
+        right_frame.grid(row=0, column=2, sticky="nsew", padx=2, pady=2)
         
-        self.stats_label = ttk.Label(self.stats_frame, text="Ready", font=("Segoe UI", 9))
-        self.stats_label.pack()
+        # Right title
+        title_frame = tk.Frame(right_frame, bg="#2d3436", height=35)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
         
-        # Control buttons container with scrollbar
-        canvas = tk.Canvas(middle_frame, width=120)
-        scrollbar = ttk.Scrollbar(middle_frame, orient="vertical", command=canvas.yview)
-        self.controls_frame = ttk.Frame(canvas)
+        self.right_title = tk.Label(title_frame, text="Right: No file", bg="#2d3436", fg="white", 
+                                   font=("Segoe UI", 11), pady=5)
+        self.right_title.pack(expand=True)
         
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas_frame = canvas.create_window((0, 0), window=self.controls_frame, anchor="nw")
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        self.controls_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        
-        # Right panel
-        right_frame = ttk.Frame(main_container)
-        right_frame.grid(row=0, column=2, sticky="nsew", padx=2)
-        
-        # Right header
-        right_header = ttk.Frame(right_frame)
-        right_header.pack(fill=tk.X)
-        
-        self.right_title = ttk.Label(right_header, text="Right Panel - No File", font=("Segoe UI", 11, "bold"))
-        self.right_title.pack(side=tk.LEFT, padx=5, pady=2)
-        
-        # Right text container
-        right_text_frame = ttk.Frame(right_frame)
+        # Right text frame (contains line numbers + text)
+        right_text_frame = tk.Frame(right_frame)
         right_text_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Right line numbers
-        self.right_lines = tk.Text(
-            right_text_frame,
-            width=5,
-            padx=5,
-            pady=5,
-            state=tk.DISABLED,
-            font=("Consolas", 11),
-            relief=tk.FLAT
-        )
+        # Create Text widget for text
+        self.right_text = tk.Text(right_text_frame, wrap=tk.NONE, font=("Consolas", 12),
+                                 bg="#ffffff", fg="#2d3436", bd=0, padx=10, pady=5, 
+                                 undo=True, insertbackground="#2d3436")
+        
+        # Create scrollbars
+        self.right_vscroll = ttk.Scrollbar(right_text_frame, orient=tk.VERTICAL)
+        right_hscroll = ttk.Scrollbar(right_frame, orient=tk.HORIZONTAL)
+        
+        # Pack in correct order
+        self.right_vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.right_text.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        right_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Line numbers canvas
+        self.right_lines = tk.Canvas(right_text_frame, width=60, bg="#ecf0f1", bd=0, highlightthickness=0)
         self.right_lines.pack(side=tk.LEFT, fill=tk.Y)
         
-        # Right text widget
-        self.right_text = tk.Text(
-            right_text_frame,
-            wrap=tk.NONE,
-            padx=5,
-            pady=5,
-            font=("Consolas", 11),
-            undo=True,
-            maxundo=20
-        )
-        self.right_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Right scrollbars
-        right_vscroll = ttk.Scrollbar(right_text_frame, orient=tk.VERTICAL, command=self.right_text.yview)
-        right_vscroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.right_text.config(yscrollcommand=lambda *args: self.sync_vertical_scroll(right_vscroll, *args))
-        
-        right_hscroll = ttk.Scrollbar(right_frame, orient=tk.HORIZONTAL, command=self.right_text.xview)
-        right_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
-        self.right_text.config(xscrollcommand=lambda *args: self.sync_horizontal_scroll(right_hscroll, *args))
+        # Configure scrolling
+        self.right_text.config(yscrollcommand=self.sync_right_scroll)
+        self.right_text.config(xscrollcommand=right_hscroll.set)
+        self.right_vscroll.config(command=self.sync_right_view)
+        right_hscroll.config(command=self.right_text.xview)
         
         # Configure grid weights
-        main_container.grid_columnconfigure(0, weight=1)
-        main_container.grid_columnconfigure(2, weight=1)
-        main_container.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(2, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
         
-        # Configure tags for highlighting
+        # Configure tags
         self.configure_tags()
         
-        # Bind text changes for auto-compare
-        self.left_text.bind("<<Modified>>", lambda e: self.on_text_change("left"))
-        self.right_text.bind("<<Modified>>", lambda e: self.on_text_change("right"))
-        self.left_text.bind("<KeyRelease>", lambda e: self.on_text_change("left"))
-        self.right_text.bind("<KeyRelease>", lambda e: self.on_text_change("right"))
+        # Bind text changes
+        self.left_text.bind("<KeyRelease>", lambda e: self.on_text_change())
+        self.right_text.bind("<KeyRelease>", lambda e: self.on_text_change())
         
-        # Enable drag and drop
-        self.setup_drag_drop()
+    def sync_left_scroll(self, first, last):
+        """Sync left scroll with others"""
+        self.left_vscroll.set(first, last)
+        if self.sync_scroll and not self.is_syncing:
+            self.is_syncing = True
+            self.right_text.yview_moveto(first)
+            self.is_syncing = False
+        self.update_line_numbers()
+        self.update_middle_panel()
+        
+    def sync_right_scroll(self, first, last):
+        """Sync right scroll with others"""
+        self.right_vscroll.set(first, last)
+        if self.sync_scroll and not self.is_syncing:
+            self.is_syncing = True
+            self.left_text.yview_moveto(first)
+            self.is_syncing = False
+        self.update_line_numbers()
+        self.update_middle_panel()
+        
+    def sync_left_view(self, *args):
+        """Sync left view command"""
+        self.left_text.yview(*args)
+        if self.sync_scroll and not self.is_syncing:
+            self.is_syncing = True
+            self.right_text.yview(*args)
+            self.is_syncing = False
+        self.update_line_numbers()
+        self.update_middle_panel()
+        
+    def sync_right_view(self, *args):
+        """Sync right view command"""
+        self.right_text.yview(*args)
+        if self.sync_scroll and not self.is_syncing:
+            self.is_syncing = True
+            self.left_text.yview(*args)
+            self.is_syncing = False
+        self.update_line_numbers()
+        self.update_middle_panel()
         
     def configure_tags(self):
-        """Configure text tags for diff highlighting"""
-        theme = self.themes["dark" if self.dark_mode else "light"]
+        """Configure text tags for highlighting"""
+        # Light colors for better visibility
+        self.left_text.tag_configure("added", background="#a8e6cf")
+        self.left_text.tag_configure("removed", background="#ffd3b6")
+        self.left_text.tag_configure("modified", background="#ffaaa5")
+        self.left_text.tag_configure("current", background="#fff200", borderwidth=2, relief="solid")
         
-        # Left text tags
-        self.left_text.tag_configure("added", background=theme["added"])
-        self.left_text.tag_configure("removed", background=theme["removed"])
-        self.left_text.tag_configure("modified", background=theme["modified"])
-        self.left_text.tag_configure("current", background=theme["highlight"])
-        
-        # Right text tags
-        self.right_text.tag_configure("added", background=theme["added"])
-        self.right_text.tag_configure("removed", background=theme["removed"])
-        self.right_text.tag_configure("modified", background=theme["modified"])
-        self.right_text.tag_configure("current", background=theme["highlight"])
+        self.right_text.tag_configure("added", background="#a8e6cf")
+        self.right_text.tag_configure("removed", background="#ffd3b6")
+        self.right_text.tag_configure("modified", background="#ffaaa5")
+        self.right_text.tag_configure("current", background="#fff200", borderwidth=2, relief="solid")
         
     def create_statusbar(self):
         """Create status bar"""
-        self.statusbar = ttk.Frame(self.root)
-        self.statusbar.pack(fill=tk.X, side=tk.BOTTOM)
+        self.statusbar = tk.Frame(self.root, bg="#2d3436", height=30)
+        self.statusbar.pack(fill=tk.X)
+        self.statusbar.pack_propagate(False)
         
-        self.status_left = ttk.Label(self.statusbar, text="Ready")
-        self.status_left.pack(side=tk.LEFT, padx=10)
+        self.status_label = tk.Label(self.statusbar, text="Ready", bg="#2d3436", fg="white", 
+                                    font=("Segoe UI", 10))
+        self.status_label.pack(side=tk.LEFT, padx=15, pady=5)
         
-        self.status_center = ttk.Label(self.statusbar, text="")
-        self.status_center.pack(side=tk.LEFT, expand=True)
-        
-        self.status_right = ttk.Label(self.statusbar, text="")
-        self.status_right.pack(side=tk.RIGHT, padx=10)
+        # Add timestamp label
+        self.time_label = tk.Label(self.statusbar, text="", bg="#2d3436", fg="#b2bec3", 
+                                  font=("Segoe UI", 9))
+        self.time_label.pack(side=tk.RIGHT, padx=15, pady=5)
         
     def setup_bindings(self):
         """Setup keyboard shortcuts"""
         self.root.bind("<Control-o>", lambda e: self.load_file("left"))
         self.root.bind("<Control-O>", lambda e: self.load_file("right"))
-        self.root.bind("<Control-s>", lambda e: self.save_file("left"))
-        self.root.bind("<Control-S>", lambda e: self.save_file("right"))
         self.root.bind("<F5>", lambda e: self.compare())
         self.root.bind("<F3>", lambda e: self.next_diff())
         self.root.bind("<Shift-F3>", lambda e: self.prev_diff())
         self.root.bind("<Control-z>", lambda e: self.undo())
-        self.root.bind("<Control-y>", lambda e: self.redo())
-        self.root.bind("<Control-f>", lambda e: self.find_dialog())
-        self.root.bind("<Control-h>", lambda e: self.replace_dialog())
-        self.root.bind("<Control-a>", lambda e: self.toggle_auto_compare())
         
-    def setup_drag_drop(self):
-        """Enable drag and drop for files"""
-        # This would require tkinterdnd2 library for full implementation
-        pass
+    def update_line_numbers(self):
+        """Update line numbers for both panels"""
+        self.update_single_line_numbers(self.left_text, self.left_lines)
+        self.update_single_line_numbers(self.right_text, self.right_lines)
         
-    def sync_vertical_scroll(self, scrollbar, first, last):
-        """Synchronize vertical scrolling"""
-        scrollbar.set(first, last)
-        if self.sync_scroll and not self.is_syncing:
-            self.is_syncing = True
-            # Sync the other text widget
-            if scrollbar.master.master == self.left_text.master:
-                self.right_text.yview_moveto(first)
-            else:
-                self.left_text.yview_moveto(first)
-            self.is_syncing = False
+    def update_single_line_numbers(self, text_widget, canvas):
+        """Update line numbers on canvas"""
+        canvas.delete("all")
+        
+        # Get the first visible line
+        first_visible = text_widget.index("@0,0")
+        first_line_num = int(first_visible.split('.')[0])
+        
+        # Get the last visible line
+        last_visible = text_widget.index(f"@0,{text_widget.winfo_height()}")
+        last_line_num = int(last_visible.split('.')[0])
+        
+        # Draw line numbers
+        for line_num in range(first_line_num, last_line_num + 1):
+            # Get y position of line
+            bbox = text_widget.bbox(f"{line_num}.0")
+            if bbox:
+                y = bbox[1] + bbox[3] // 2
+                canvas.create_text(50, y, text=str(line_num), anchor="e", 
+                                 font=("Consolas", 11), fill="#636e72")
+                
+    def update_middle_panel(self):
+        """Update middle panel to show differences at correct positions"""
+        self.middle_canvas.delete("all")
+        
+        if not self.differences:
+            return
             
-    def sync_horizontal_scroll(self, scrollbar, first, last):
-        """Synchronize horizontal scrolling"""
-        scrollbar.set(first, last)
-        if self.sync_scroll and not self.is_syncing:
-            self.is_syncing = True
-            # Sync the other text widget
-            if scrollbar.master == self.left_text.master.master:
-                self.right_text.xview_moveto(first)
+        # Get the first visible line to calculate relative positions
+        first_visible = self.left_text.index("@0,0")
+        first_line_num = int(first_visible.split('.')[0])
+        
+        for i, diff in enumerate(self.differences):
+            # Determine which line to use for positioning
+            if diff['type'] == 'insert':
+                target_line = diff['right_start']
             else:
-                self.left_text.xview_moveto(first)
-            self.is_syncing = False
-            
-    def toggle_sync_scroll(self):
-        """Toggle scroll synchronization"""
-        self.sync_scroll = not self.sync_scroll
-        self.status_left.config(text=f"Sync Scroll: {'ON' if self.sync_scroll else 'OFF'}")
-        
-    def toggle_theme(self):
-        """Toggle between light and dark theme"""
-        self.dark_mode = not self.dark_mode
-        self.apply_theme()
-        
+                target_line = diff['left_start']
+                
+            # Get the y position of the target line
+            bbox = None
+            if diff['type'] == 'insert' or (diff['type'] == 'replace' and diff['left_start'] == 0):
+                # Use right panel for positioning
+                bbox = self.right_text.bbox(f"{target_line}.0")
+            else:
+                # Use left panel for positioning
+                bbox = self.left_text.bbox(f"{target_line}.0")
+                
+            if bbox:
+                y_pos = bbox[1] + bbox[3] // 2
+                
+                # Create a frame for the difference widget
+                widget_frame = tk.Frame(self.middle_canvas, bg="#ffffff", relief=tk.RAISED, bd=1)
+                
+                # Determine style based on diff type
+                if diff['type'] == 'delete':
+                    color = "#e74c3c"
+                    symbol = "−"
+                    info = f"L{diff['left_start']}"
+                    if diff['left_end'] > diff['left_start']:
+                        info += f"-{diff['left_end']}"
+                elif diff['type'] == 'insert':
+                    color = "#00b894"
+                    symbol = "+"
+                    info = f"R{diff['right_start']}"
+                    if diff['right_end'] > diff['right_start']:
+                        info += f"-{diff['right_end']}"
+                else:
+                    color = "#f39c12"
+                    symbol = "≠"
+                    info = f"L{diff['left_start']}"
+                    if diff['left_end'] > diff['left_start']:
+                        info += f"-{diff['left_end']}"
+                
+                # Create info label
+                info_label = tk.Label(widget_frame, text=f"{symbol} {info}", 
+                                     bg="#ffffff", fg=color,
+                                     font=("Segoe UI", 9, "bold"), cursor="hand2")
+                info_label.pack(pady=2, padx=5)
+                info_label.bind("<Button-1>", lambda e, idx=i: self.goto_diff(idx))
+                
+                # Button container
+                btn_container = tk.Frame(widget_frame, bg="#ffffff")
+                btn_container.pack(pady=2)
+                
+                # Add copy buttons
+                if diff['type'] != 'insert':
+                    btn = tk.Button(btn_container, text="Copy →", 
+                                   command=lambda d=diff: self.copy_diff(d, "right"),
+                                   bg="#0984e3", fg="white", bd=0,
+                                   font=("Segoe UI", 8, "bold"),
+                                   padx=8, pady=2, cursor="hand2")
+                    btn.pack(side=tk.LEFT, padx=2)
+                    self.add_hover_effect(btn, "#0984e3", "#74b9ff")
+                    
+                if diff['type'] != 'delete':
+                    btn = tk.Button(btn_container, text="← Copy", 
+                                   command=lambda d=diff: self.copy_diff(d, "left"),
+                                   bg="#00b894", fg="white", bd=0,
+                                   font=("Segoe UI", 8, "bold"),
+                                   padx=8, pady=2, cursor="hand2")
+                    btn.pack(side=tk.LEFT, padx=2)
+                    self.add_hover_effect(btn, "#00b894", "#55efc4")
+                
+                # Create window on canvas at exact position
+                self.middle_canvas.create_window(80, y_pos, window=widget_frame, anchor="center")
+                
     def toggle_auto_compare(self):
-        """Toggle auto-compare feature"""
+        """Toggle auto compare mode"""
         self.auto_compare = not self.auto_compare
         
-        # Update UI
         if self.auto_compare:
-            self.auto_compare_btn.configure(text="🔄 Auto: ON", bg="#28A745")
-            self.auto_status.config(text="🟢 Auto-compare: ON")
-            self.status_center.config(text="Auto-compare enabled")
-            # Start auto-compare
-            self.schedule_compare()
+            self.auto_btn.config(text="⚡ Auto: ON", bg="#00b894")
+            self.add_hover_effect(self.auto_btn, "#00b894", "#55efc4")
         else:
-            self.auto_compare_btn.configure(text="🔄 Auto: OFF", bg="#6C757D")
-            self.auto_status.config(text="🔴 Auto-compare: OFF")
-            self.status_center.config(text="Auto-compare disabled")
-            # Cancel pending compare
-            if self.compare_timer:
-                self.root.after_cancel(self.compare_timer)
-                self.compare_timer = None
-        
-    def on_text_change(self, side):
-        """Handle text changes"""
-        if self.is_updating:
-            return
+            self.auto_btn.config(text="⚡ Auto: OFF", bg="#636e72")
+            self.add_hover_effect(self.auto_btn, "#636e72", "#95a5a6")
             
-        self.update_line_numbers(side)
+        self.status_label.config(text=f"Auto-compare: {'enabled' if self.auto_compare else 'disabled'}")
         
-        # Schedule auto-compare if enabled
         if self.auto_compare:
             self.schedule_compare()
-        
-    def schedule_compare(self):
-        """Schedule an automatic comparison after a delay"""
-        if not self.auto_compare:
-            return
+        elif self.compare_timer:
+            self.root.after_cancel(self.compare_timer)
+            self.compare_timer = None
             
-        # Cancel previous timer if exists
+    def on_text_change(self):
+        """Handle text changes"""
+        self.update_line_numbers()
+        
+        if self.auto_compare:
+            self.schedule_compare()
+            
+    def schedule_compare(self):
+        """Schedule auto comparison"""
         if self.compare_timer:
             self.root.after_cancel(self.compare_timer)
-            
-        # Schedule new compare
-        self.compare_timer = self.root.after(self.compare_delay, self.auto_compare_texts)
-        
-    def auto_compare_texts(self):
-        """Perform automatic comparison"""
-        if self.auto_compare:
-            self.compare(auto=True)
-            self.compare_timer = None
-        
-    def update_line_numbers(self, side=None):
-        """Update line numbers for text widgets"""
-        if side == "left" or side is None:
-            self.update_single_line_numbers(self.left_text, self.left_lines)
-        if side == "right" or side is None:
-            self.update_single_line_numbers(self.right_text, self.right_lines)
-            
-    def update_single_line_numbers(self, text_widget, line_widget):
-        """Update line numbers for a single text widget"""
-        line_widget.config(state=tk.NORMAL)
-        line_widget.delete(1.0, tk.END)
-        
-        lines = text_widget.get(1.0, tk.END).count('\n')
-        line_numbers = '\n'.join(str(i) for i in range(1, lines + 1))
-        line_widget.insert(1.0, line_numbers)
-        line_widget.config(state=tk.DISABLED)
+        self.compare_timer = self.root.after(self.compare_delay, self.compare)
         
     def load_file(self, side):
         """Load file into panel"""
         filename = filedialog.askopenfilename(
-            title=f"Open {side.capitalize()} File",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            title=f"Open {side} file",
+            filetypes=[("All files", "*.*"), ("Text files", "*.txt"), 
+                      ("Python files", "*.py"), ("JavaScript files", "*.js")]
         )
         
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     content = f.read()
-                    
-                self.is_updating = True
                     
                 if side == "left":
                     self.left_text.delete(1.0, tk.END)
@@ -570,258 +472,117 @@ class ModernDiffApp:
                     self.right_file = filename
                     self.right_title.config(text=f"Right: {os.path.basename(filename)}")
                     
-                self.is_updating = False
-                    
-                self.update_line_numbers(side)
-                self.status_left.config(text=f"Loaded: {os.path.basename(filename)}")
+                self.update_line_numbers()
+                self.status_label.config(text=f"Loaded: {os.path.basename(filename)}")
                 self.save_to_history()
                 
-                # Auto-compare if both panels have content
-                if self.auto_compare:
-                    left_content = self.left_text.get(1.0, tk.END).strip()
-                    right_content = self.right_text.get(1.0, tk.END).strip()
-                    if left_content and right_content:
-                        self.compare(auto=True)
-                
+                if self.auto_compare and self.left_text.get(1.0, tk.END).strip() and self.right_text.get(1.0, tk.END).strip():
+                    self.compare()
+                    
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
-            finally:
-                self.is_updating = False
                 
-    def save_file(self, side):
-        """Save file from panel"""
-        if not side:
-            side = self.get_active_panel()
-            
-        if not side:
-            messagebox.showwarning("Warning", "Please select a panel to save")
-            return
-            
-        filename = filedialog.asksaveasfilename(
-            title=f"Save {side.capitalize()} File",
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
+    def compare(self):
+        """Compare the two texts"""
+        left_lines = self.left_text.get(1.0, "end-1c").splitlines()
+        right_lines = self.right_text.get(1.0, "end-1c").splitlines()
         
-        if filename:
-            try:
-                content = self.left_text.get(1.0, tk.END) if side == "left" else self.right_text.get(1.0, tk.END)
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(content.rstrip())
-                    
-                if side == "left":
-                    self.left_file = filename
-                    self.left_title.config(text=f"Left: {os.path.basename(filename)}")
-                else:
-                    self.right_file = filename
-                    self.right_title.config(text=f"Right: {os.path.basename(filename)}")
-                    
-                self.status_left.config(text=f"Saved: {os.path.basename(filename)}")
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save file: {str(e)}")
-                
-    def get_active_panel(self):
-        """Get currently active panel"""
-        focus = self.root.focus_get()
-        if focus == self.left_text:
-            return "left"
-        elif focus == self.right_text:
-            return "right"
-        return None
-        
-    def compare(self, auto=False):
-        """Compare the two text panels"""
-        left_lines = self.left_text.get(1.0, tk.END).splitlines()
-        right_lines = self.right_text.get(1.0, tk.END).splitlines()
-        
-        # Don't compare if both panels are empty
-        if not any(left_lines) and not any(right_lines):
-            return
-            
-        # Clear previous highlights
+        # Clear previous
         self.clear_highlights()
-        
-        # Clear control buttons
-        for widget in self.controls_frame.winfo_children():
-            widget.destroy()
-            
         self.differences = []
+        self.middle_canvas.delete("all")
         
-        # Perform diff
+        # Get differences
         differ = difflib.SequenceMatcher(None, left_lines, right_lines)
-        
-        added_count = 0
-        removed_count = 0
-        modified_count = 0
         
         for tag, i1, i2, j1, j2 in differ.get_opcodes():
             if tag != 'equal':
-                diff_data = {
+                self.differences.append({
                     'type': tag,
                     'left_start': i1 + 1,
                     'left_end': i2,
                     'right_start': j1 + 1,
                     'right_end': j2
-                }
-                self.differences.append(diff_data)
+                })
                 
                 # Highlight differences
                 if tag == 'delete':
-                    removed_count += (i2 - i1)
                     for i in range(i1, i2):
                         self.left_text.tag_add("removed", f"{i+1}.0", f"{i+1}.end")
                 elif tag == 'insert':
-                    added_count += (j2 - j1)
                     for j in range(j1, j2):
                         self.right_text.tag_add("added", f"{j+1}.0", f"{j+1}.end")
                 elif tag == 'replace':
-                    modified_count += max(i2 - i1, j2 - j1)
                     for i in range(i1, i2):
                         self.left_text.tag_add("modified", f"{i+1}.0", f"{i+1}.end")
                     for j in range(j1, j2):
                         self.right_text.tag_add("modified", f"{j+1}.0", f"{j+1}.end")
-                        
-                # Create control button
-                self.create_diff_control(diff_data, len(self.differences))
-                
+        
+        # Update middle panel
+        self.update_middle_panel()
+        
         # Update status
         if self.differences:
-            diff_text = f"{len(self.differences)} differences"
-            if not auto:
-                diff_text += f" (➕{added_count} ➖{removed_count} ✏️{modified_count})"
-            self.diff_info.config(text=diff_text)
-            self.stats_label.config(text=f"Total: {len(self.differences)}")
-            
-            # Update statusbar with details
-            self.status_left.config(text=f"Differences: {len(self.differences)}")
-            if auto:
-                self.status_center.config(text="Auto-compared")
+            self.info_label.config(text=f"🔍 {len(self.differences)} differences found")
+            self.status_label.config(text=f"Comparison complete: {len(self.differences)} differences")
         else:
-            self.diff_info.config(text="Files are identical ✓")
-            self.stats_label.config(text="Identical")
-            self.status_left.config(text="No differences found")
-            self.status_center.config(text="Files match")
+            self.info_label.config(text="✅ Files are identical")
+            self.status_label.config(text="Files are identical")
             
-        # Update status right with timestamp
-        compare_time = datetime.now().strftime("%H:%M:%S")
-        self.status_right.config(text=f"Last compare: {compare_time}")
-            
-    def create_diff_control(self, diff_data, index):
-        """Create control buttons for a difference"""
-        frame = ttk.Frame(self.controls_frame)
-        frame.pack(fill=tk.X, pady=2)
+        self.time_label.config(text=datetime.now().strftime("%H:%M:%S"))
         
-        # Diff info with better formatting
-        if diff_data['type'] == 'delete':
-            icon = "🗑️"
-            label = f"#{index}: Removed"
-            lines = f"L{diff_data['left_start']}"
-            if diff_data['left_end'] > diff_data['left_start']:
-                lines += f"-{diff_data['left_end']}"
-            color = "#DC3545"
-        elif diff_data['type'] == 'insert':
-            icon = "➕"
-            label = f"#{index}: Added"
-            lines = f"R{diff_data['right_start']}"
-            if diff_data['right_end'] > diff_data['right_start']:
-                lines += f"-{diff_data['right_end']}"
-            color = "#28A745"
-        else:
-            icon = "✏️"
-            label = f"#{index}: Modified"
-            lines = f"L{diff_data['left_start']}"
-            if diff_data['left_end'] > diff_data['left_start']:
-                lines += f"-{diff_data['left_end']}"
-            color = "#FFC107"
-            
-        # Create info label with icon
-        info_text = f"{icon} {label}\n{lines}"
-        ttk.Label(frame, text=info_text, font=("Segoe UI", 8)).pack()
-        
-        # Action buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack()
-        
-        # Navigation button
-        tk.Button(
-            btn_frame,
-            text="Go",
-            command=lambda: self.goto_diff(index - 1),
-            bg="#6C757D",
-            fg="white",
-            width=4,
-            relief=tk.FLAT,
-            cursor="hand2",
-            font=("Segoe UI", 8)
-        ).pack(side=tk.LEFT, padx=1)
-        
-        if diff_data['type'] != 'insert':
-            tk.Button(
-                btn_frame,
-                text="→",
-                command=lambda: self.copy_diff(diff_data, "right"),
-                bg="#007BFF",
-                fg="white",
-                width=3,
-                relief=tk.FLAT,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=1)
-            
-        if diff_data['type'] != 'delete':
-            tk.Button(
-                btn_frame,
-                text="←",
-                command=lambda: self.copy_diff(diff_data, "left"),
-                bg="#28A745",
-                fg="white",
-                width=3,
-                relief=tk.FLAT,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=1)
-            
-    def goto_diff(self, index):
-        """Go to a specific difference"""
-        if 0 <= index < len(self.differences):
-            self.current_diff = index
-            self.highlight_current_diff()
-            
-    def copy_diff(self, diff_data, direction):
-        """Copy difference from one panel to another"""
-        self.is_updating = True
+    def copy_diff(self, diff, direction):
+        """Copy difference from one side to another"""
         self.save_to_history()
         
-        if direction == "right":
-            # Copy from left to right
-            text = ""
-            for i in range(diff_data['left_start'], diff_data['left_end'] + 1):
-                line = self.left_text.get(f"{i}.0", f"{i}.end")
-                if line:
-                    text += line + "\n"
+        try:
+            if direction == "right":
+                # Copy from left to right
+                if diff['type'] == 'delete':
+                    # Insert deleted lines into right
+                    text = ""
+                    for i in range(diff['left_start'], diff['left_end'] + 1):
+                        if i <= int(self.left_text.index('end-1c').split('.')[0]):
+                            line = self.left_text.get(f"{i}.0", f"{i}.end")
+                            text += line + "\n"
+                    self.right_text.insert(f"{diff['right_start']}.0", text)
                     
-            # Delete existing lines in right
-            if diff_data['right_end'] >= diff_data['right_start']:
-                self.right_text.delete(f"{diff_data['right_start']}.0", f"{diff_data['right_end']+1}.0")
-                
-            # Insert new text
-            self.right_text.insert(f"{diff_data['right_start']}.0", text)
-            
-        else:
-            # Copy from right to left
-            text = ""
-            for i in range(diff_data['right_start'], diff_data['right_end'] + 1):
-                line = self.right_text.get(f"{i}.0", f"{i}.end")
-                if line:
-                    text += line + "\n"
+                elif diff['type'] == 'replace':
+                    # Delete right lines and insert left lines
+                    self.right_text.delete(f"{diff['right_start']}.0", f"{diff['right_end']}.end+1c")
+                    text = ""
+                    for i in range(diff['left_start'], diff['left_end'] + 1):
+                        if i <= int(self.left_text.index('end-1c').split('.')[0]):
+                            line = self.left_text.get(f"{i}.0", f"{i}.end")
+                            text += line + "\n"
+                    self.right_text.insert(f"{diff['right_start']}.0", text.rstrip() + "\n")
                     
-            # Delete existing lines in left
-            if diff_data['left_end'] >= diff_data['left_start']:
-                self.left_text.delete(f"{diff_data['left_start']}.0", f"{diff_data['left_end']+1}.0")
-                
-            # Insert new text
-            self.left_text.insert(f"{diff_data['left_start']}.0", text)
+            else:  # direction == "left"
+                # Copy from right to left
+                if diff['type'] == 'insert':
+                    # Insert added lines into left
+                    text = ""
+                    for i in range(diff['right_start'], diff['right_end'] + 1):
+                        if i <= int(self.right_text.index('end-1c').split('.')[0]):
+                            line = self.right_text.get(f"{i}.0", f"{i}.end")
+                            text += line + "\n"
+                    self.left_text.insert(f"{diff['left_start']}.0", text)
+                    
+                elif diff['type'] == 'replace':
+                    # Delete left lines and insert right lines
+                    self.left_text.delete(f"{diff['left_start']}.0", f"{diff['left_end']}.end+1c")
+                    text = ""
+                    for i in range(diff['right_start'], diff['right_end'] + 1):
+                        if i <= int(self.right_text.index('end-1c').split('.')[0]):
+                            line = self.right_text.get(f"{i}.0", f"{i}.end")
+                            text += line + "\n"
+                    self.left_text.insert(f"{diff['left_start']}.0", text.rstrip() + "\n")
+                    
+            self.status_label.config(text=f"Copied difference to {'right' if direction == 'right' else 'left'}")
+                    
+        except Exception as e:
+            print(f"Error copying diff: {e}")
             
-        self.is_updating = False
         self.update_line_numbers()
         
         # Re-compare after change
@@ -829,79 +590,9 @@ class ModernDiffApp:
             self.schedule_compare()
         else:
             self.compare()
-        
-    def clear_highlights(self):
-        """Clear all highlighting"""
-        for tag in ["added", "removed", "modified", "current"]:
-            self.left_text.tag_remove(tag, 1.0, tk.END)
-            self.right_text.tag_remove(tag, 1.0, tk.END)
             
-    def highlight_current_diff(self):
-        """Highlight current difference"""
-        if not self.differences or self.current_diff < 0:
-            return
-            
-        diff = self.differences[self.current_diff]
-        
-        # Clear previous current highlight
-        self.left_text.tag_remove("current", 1.0, tk.END)
-        self.right_text.tag_remove("current", 1.0, tk.END)
-        
-        # Add current highlight
-        if diff['left_end'] >= diff['left_start']:
-            self.left_text.tag_add("current", f"{diff['left_start']}.0", f"{diff['left_end']+1}.0")
-            self.left_text.see(f"{diff['left_start']}.0")
-            
-        if diff['right_end'] >= diff['right_start']:
-            self.right_text.tag_add("current", f"{diff['right_start']}.0", f"{diff['right_end']+1}.0")
-            self.right_text.see(f"{diff['right_start']}.0")
-            
-        self.status_right.config(text=f"Viewing: {self.current_diff + 1}/{len(self.differences)}")
-        
-    def next_diff(self):
-        """Navigate to next difference"""
-        if self.differences and self.current_diff < len(self.differences) - 1:
-            self.current_diff += 1
-            self.highlight_current_diff()
-            
-    def prev_diff(self):
-        """Navigate to previous difference"""
-        if self.differences and self.current_diff > 0:
-            self.current_diff -= 1
-            self.highlight_current_diff()
-            
-    def merge_all(self, direction):
-        """Merge all differences in one direction"""
-        if not self.differences:
-            messagebox.showinfo("Info", "No differences to merge")
-            return
-            
-        msg = f"Merge all differences to the {direction} panel?"
-        if not messagebox.askyesno("Confirm", msg):
-            return
-            
-        self.is_updating = True
-        self.save_to_history()
-        
-        if direction == "right":
-            content = self.left_text.get(1.0, tk.END)
-            self.right_text.delete(1.0, tk.END)
-            self.right_text.insert(1.0, content)
-        else:
-            content = self.right_text.get(1.0, tk.END)
-            self.left_text.delete(1.0, tk.END)
-            self.left_text.insert(1.0, content)
-            
-        self.is_updating = False
-        self.update_line_numbers()
-        
-        if self.auto_compare:
-            self.schedule_compare()
-        else:
-            self.compare()
-        
     def save_to_history(self):
-        """Save current state to history"""
+        """Save current state for undo"""
         state = {
             'left': self.left_text.get(1.0, tk.END),
             'right': self.right_text.get(1.0, tk.END)
@@ -915,294 +606,74 @@ class ModernDiffApp:
         self.history_index += 1
         
         # Limit history size
-        if len(self.history) > self.max_history:
+        if len(self.history) > 50:
             self.history.pop(0)
             self.history_index -= 1
             
     def undo(self):
         """Undo last action"""
         if self.history_index > 0:
-            self.is_updating = True
             self.history_index -= 1
             state = self.history[self.history_index]
+            
             self.left_text.delete(1.0, tk.END)
             self.left_text.insert(1.0, state['left'])
             self.right_text.delete(1.0, tk.END)
             self.right_text.insert(1.0, state['right'])
-            self.is_updating = False
+            
             self.update_line_numbers()
-            self.status_left.config(text="Undo performed")
+            self.status_label.config(text="Undo performed")
             
             if self.auto_compare:
                 self.schedule_compare()
             
-    def redo(self):
-        """Redo last undone action"""
-        if self.history_index < len(self.history) - 1:
-            self.is_updating = True
-            self.history_index += 1
-            state = self.history[self.history_index]
-            self.left_text.delete(1.0, tk.END)
-            self.left_text.insert(1.0, state['left'])
-            self.right_text.delete(1.0, tk.END)
-            self.right_text.insert(1.0, state['right'])
-            self.is_updating = False
-            self.update_line_numbers()
-            self.status_left.config(text="Redo performed")
+    def clear_highlights(self):
+        """Clear all highlights"""
+        for tag in ["added", "removed", "modified", "current"]:
+            self.left_text.tag_remove(tag, 1.0, tk.END)
+            self.right_text.tag_remove(tag, 1.0, tk.END)
             
-            if self.auto_compare:
-                self.schedule_compare()
+    def goto_diff(self, index):
+        """Go to specific difference"""
+        if 0 <= index < len(self.differences):
+            self.current_diff = index
+            diff = self.differences[index]
             
-    def clear_all(self):
-        """Clear all panels"""
-        if messagebox.askyesno("Confirm", "Clear all panels?"):
-            self.is_updating = True
-            self.save_to_history()
-            self.left_text.delete(1.0, tk.END)
-            self.right_text.delete(1.0, tk.END)
-            self.left_file = None
-            self.right_file = None
-            self.left_title.config(text="Left Panel - No File")
-            self.right_title.config(text="Right Panel - No File")
-            self.is_updating = False
-            self.update_line_numbers()
-            self.clear_highlights()
-            for widget in self.controls_frame.winfo_children():
-                widget.destroy()
-            self.differences = []
-            self.current_diff = -1
-            self.diff_info.config(text="No differences")
-            self.stats_label.config(text="Ready")
-            self.status_left.config(text="Panels cleared")
+            # Clear current highlights
+            self.left_text.tag_remove("current", 1.0, tk.END)
+            self.right_text.tag_remove("current", 1.0, tk.END)
             
-    def open_settings(self):
-        """Open settings dialog"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Settings")
-        dialog.geometry("400x300")
-        dialog.transient(self.root)
-        
-        # Auto-compare delay setting
-        ttk.Label(dialog, text="Auto-compare delay (ms):").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        delay_var = tk.StringVar(value=str(self.compare_delay))
-        delay_entry = ttk.Entry(dialog, textvariable=delay_var, width=10)
-        delay_entry.grid(row=0, column=1, padx=10, pady=10)
-        
-        # Font size setting
-        ttk.Label(dialog, text="Font size:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        font_var = tk.StringVar(value="11")
-        font_spinbox = ttk.Spinbox(dialog, from_=8, to=20, textvariable=font_var, width=10)
-        font_spinbox.grid(row=1, column=1, padx=10, pady=10)
-        
-        def apply_settings():
-            try:
-                self.compare_delay = int(delay_var.get())
-                font_size = int(font_var.get())
+            # Highlight and scroll to difference
+            if diff['left_end'] >= diff['left_start']:
+                self.left_text.see(f"{diff['left_start']}.0")
+                self.left_text.tag_add("current", f"{diff['left_start']}.0", f"{diff['left_end'] + 1}.0")
                 
-                # Update font size
-                new_font = ("Consolas", font_size)
-                self.left_text.configure(font=new_font)
-                self.right_text.configure(font=new_font)
-                self.left_lines.configure(font=new_font)
-                self.right_lines.configure(font=new_font)
+            if diff['right_end'] >= diff['right_start']:
+                self.right_text.see(f"{diff['right_start']}.0")
+                self.right_text.tag_add("current", f"{diff['right_start']}.0", f"{diff['right_end'] + 1}.0")
                 
-                messagebox.showinfo("Success", "Settings applied")
-                dialog.destroy()
-            except ValueError:
-                messagebox.showerror("Error", "Invalid values")
-                
-        ttk.Button(dialog, text="Apply", command=apply_settings).grid(row=3, column=0, padx=10, pady=20)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=3, column=1, padx=10, pady=20)
+            self.status_label.config(text=f"Viewing difference {index + 1} of {len(self.differences)}")
             
-    def find_dialog(self):
-        """Open find dialog"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Find")
-        dialog.geometry("400x150")
-        dialog.transient(self.root)
-        
-        ttk.Label(dialog, text="Find:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        find_entry = ttk.Entry(dialog, width=30)
-        find_entry.grid(row=0, column=1, padx=5, pady=5)
-        find_entry.focus()
-        
-        def find_text():
-            text = find_entry.get()
-            if not text:
-                return
-                
-            # Search in active panel
-            widget = self.left_text if self.get_active_panel() == "left" else self.right_text
-            
-            # Clear previous search highlights
-            widget.tag_remove("search", 1.0, tk.END)
-            
-            # Search and highlight
-            start = 1.0
-            count = 0
-            while True:
-                pos = widget.search(text, start, tk.END)
-                if not pos:
-                    break
-                end = f"{pos}+{len(text)}c"
-                widget.tag_add("search", pos, end)
-                widget.tag_config("search", background="yellow")
-                start = end
-                count += 1
-                
-            # Go to first occurrence
-            first = widget.search(text, 1.0, tk.END)
-            if first:
-                widget.see(first)
-                self.status_center.config(text=f"Found {count} occurrences")
+    def next_diff(self):
+        """Go to next difference"""
+        if self.differences:
+            if self.current_diff < len(self.differences) - 1:
+                self.goto_diff(self.current_diff + 1)
             else:
-                self.status_center.config(text="Text not found")
+                self.goto_diff(0)
                 
-        ttk.Button(dialog, text="Find", command=find_text).grid(row=1, column=1, padx=5, pady=5)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=1, column=2, padx=5, pady=5)
-        
-    def replace_dialog(self):
-        """Open replace dialog"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Replace")
-        dialog.geometry("400x200")
-        dialog.transient(self.root)
-        
-        ttk.Label(dialog, text="Find:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        find_entry = ttk.Entry(dialog, width=30)
-        find_entry.grid(row=0, column=1, columnspan=2, padx=5, pady=5)
-        
-        ttk.Label(dialog, text="Replace:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        replace_entry = ttk.Entry(dialog, width=30)
-        replace_entry.grid(row=1, column=1, columnspan=2, padx=5, pady=5)
-        
-        def replace_all():
-            find_text = find_entry.get()
-            replace_text = replace_entry.get()
-            
-            if not find_text:
-                return
-                
-            widget = self.left_text if self.get_active_panel() == "left" else self.right_text
-            content = widget.get(1.0, tk.END)
-            new_content = content.replace(find_text, replace_text)
-            
-            if content != new_content:
-                self.is_updating = True
-                self.save_to_history()
-                widget.delete(1.0, tk.END)
-                widget.insert(1.0, new_content)
-                self.is_updating = False
-                self.update_line_numbers()
-                count = content.count(find_text)
-                messagebox.showinfo("Replace", f"Replaced {count} occurrences")
-                dialog.destroy()
-                
-                if self.auto_compare:
-                    self.schedule_compare()
-                
-        ttk.Button(dialog, text="Replace All", command=replace_all).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=2, column=2, padx=5, pady=5)
-        
-    def export_diff(self):
-        """Export differences to file"""
-        if not self.differences:
-            messagebox.showinfo("Info", "No differences to export")
-            return
-            
-        filename = filedialog.asksaveasfilename(
-            title="Export Differences",
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("HTML files", "*.html"), ("JSON files", "*.json")]
-        )
-        
-        if filename:
-            try:
-                ext = os.path.splitext(filename)[1].lower()
-                
-                if ext == ".json":
-                    with open(filename, 'w') as f:
-                        json.dump(self.differences, f, indent=2)
-                elif ext == ".html":
-                    self.export_html(filename)
-                else:
-                    self.export_text(filename)
-                    
-                messagebox.showinfo("Success", f"Differences exported to {os.path.basename(filename)}")
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to export: {str(e)}")
-                
-    def export_text(self, filename):
-        """Export differences as text"""
-        with open(filename, 'w') as f:
-            f.write(f"Diff Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(f"Left file: {self.left_file or 'Untitled'}\n")
-            f.write(f"Right file: {self.right_file or 'Untitled'}\n")
-            f.write(f"Total differences: {len(self.differences)}\n\n")
-            
-            for i, diff in enumerate(self.differences, 1):
-                f.write(f"Difference #{i}\n")
-                f.write(f"Type: {diff['type']}\n")
-                f.write(f"Left: Lines {diff['left_start']}-{diff['left_end']}\n")
-                f.write(f"Right: Lines {diff['right_start']}-{diff['right_end']}\n")
-                f.write("-" * 30 + "\n")
-                
-    def export_html(self, filename):
-        """Export differences as HTML"""
-        html = f"""
-        <html>
-        <head>
-            <title>Diff Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                h1 {{ color: #333; }}
-                .info {{ background: #f0f0f0; padding: 10px; margin: 10px 0; }}
-                .diff {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
-                .added {{ background-color: #d4edda; border-color: #28a745; }}
-                .removed {{ background-color: #f8d7da; border-color: #dc3545; }}
-                .modified {{ background-color: #fff3cd; border-color: #ffc107; }}
-                .diff h3 {{ margin-top: 0; }}
-            </style>
-        </head>
-        <body>
-            <h1>Diff Report</h1>
-            <div class="info">
-                <p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-                <p><strong>Left file:</strong> {self.left_file or 'Untitled'}</p>
-                <p><strong>Right file:</strong> {self.right_file or 'Untitled'}</p>
-                <p><strong>Total differences:</strong> {len(self.differences)}</p>
-            </div>
-        """
-        
-        for i, diff in enumerate(self.differences, 1):
-            css_class = "added" if diff['type'] == "insert" else "removed" if diff['type'] == "delete" else "modified"
-            html += f"""
-            <div class="diff {css_class}">
-                <h3>Difference #{i}</h3>
-                <p><strong>Type:</strong> {diff['type'].capitalize()}</p>
-                <p><strong>Left:</strong> Lines {diff['left_start']}-{diff['left_end']}</p>
-                <p><strong>Right:</strong> Lines {diff['right_start']}-{diff['right_end']}</p>
-            </div>
-            """
-            
-        html += "</body></html>"
-        
-        with open(filename, 'w') as f:
-            f.write(html)
+    def prev_diff(self):
+        """Go to previous difference"""
+        if self.differences:
+            if self.current_diff > 0:
+                self.goto_diff(self.current_diff - 1)
+            else:
+                self.goto_diff(len(self.differences) - 1)
 
 
 def main():
     root = tk.Tk()
     app = ModernDiffApp(root)
-    
-    # Set window icon if available
-    try:
-        root.iconbitmap("diff.ico")
-    except:
-        pass
-        
     root.mainloop()
 
 
