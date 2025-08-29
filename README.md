@@ -297,7 +297,7 @@ in the Software without restriction...
 
 ## 👥 Authors
 
-- **Your Name** - *Initial work* - [GitHub](https://github.com/JustVugg)
+- **JustVugg** - *Initial work* - [GitHub](https://github.com/JustVugg)
 
 ### Acknowledgments
 - Built with Python and Tkinter
